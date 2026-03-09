@@ -25,6 +25,12 @@ def main():
         default=2.0,
         help="Delay between requests in seconds (default: 2.0)",
     )
+    parser.add_argument(
+        "--db-path",
+        type=str,
+        default="",
+        help="Path to Shamela .bok files directory (required for shamela target)",
+    )
 
     args = parser.parse_args()
 
@@ -43,9 +49,9 @@ def main():
     if args.target in ("shamela", "all"):
         from scrapers.shamela import ShamelaScraper
 
-        scraper = ShamelaScraper(delay=args.delay)
+        scraper = ShamelaScraper(db_path=args.db_path, delay=args.delay)
         print(f"\n{'='*50}")
-        print("Starting Shamela.ws scraper")
+        print("Starting Shamela.ws database extractor")
         print(f"{'='*50}\n")
         scraper.run(limit=args.limit)
 

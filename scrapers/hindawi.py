@@ -15,6 +15,11 @@ class HindawiScraper(BaseScraper):
     CATALOG_FILE = os.path.join(HINDAWI_DATA_DIR, "catalog.json")
     TOTAL_LISTING_PAGES = 215  # ~20 books per page
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Cache author bios by contributor ID to avoid refetching
+        self._author_bio_cache: dict[str, str] = {}
+
     def scrape_catalog(self) -> list[dict]:
         """Scrape the full book catalog from listing pages.
 
@@ -104,16 +109,32 @@ class HindawiScraper(BaseScraper):
 
         # Extract metadata
         author = ""
+        author_id = ""
         author_el = soup.find(class_="author")
         if author_el:
             author = author_el.get_text(strip=True)
-        else:
+            # Check if author element contains a contributor link
+            author_link = author_el.find("a", href=re.compile(r"/contributors/"))
+            if author_link:
+                m = re.search(r"/contributors/(\d+)/", author_link.get("href", ""))
+                if m:
+                    author_id = m.group(1)
+
+        if not author:
             # Find contributor links, skip generic "المساهمون" (Contributors) label
             for a in soup.find_all("a", href=re.compile(r"/contributors/")):
                 name = a.get_text(strip=True)
                 if name and name != "المساهمون":
                     author = name
+                    m = re.search(r"/contributors/(\d+)/", a.get("href", ""))
+                    if m:
+                        author_id = m.group(1)
                     break
+
+        # Fetch author bio from contributor page
+        author_bio = ""
+        if author_id:
+            author_bio = self._scrape_author_bio(author_id)
 
         description = ""
         # The content div on book pages holds the description
@@ -171,6 +192,7 @@ class HindawiScraper(BaseScraper):
             "id": book_id,
             "title": book_title,
             "author": author,
+            "author_bio": author_bio,
             "category": category,
             "description": description,
             "url": book_url,
@@ -179,6 +201,39 @@ class HindawiScraper(BaseScraper):
 
         self.save_json(book_data, filepath)
         return book_data
+
+    def _scrape_author_bio(self, contributor_id: str) -> str:
+        """Fetch author biography from their Hindawi contributor page.
+
+        Results are cached so the same author's page is only fetched once.
+        """
+        if contributor_id in self._author_bio_cache:
+            return self._author_bio_cache[contributor_id]
+
+        url = f"{HINDAWI_BASE_URL}/contributors/{contributor_id}/"
+        response = self.fetch(url)
+        if response is None:
+            self._author_bio_cache[contributor_id] = ""
+            return ""
+
+        soup = BeautifulSoup(response.text, "lxml")
+
+        # Bio paragraphs are in the page body before the books listing
+        bio_parts = []
+        books_div = soup.find("div", class_="books")
+
+        # Collect <p> tags that appear before the books section
+        for p in soup.find_all("p"):
+            # Stop if we've reached the books section
+            if books_div and p.find_parent("div", class_="books"):
+                break
+            text = clean_arabic_text(p.get_text(strip=True))
+            if text and len(text) > 10:  # skip very short/empty paragraphs
+                bio_parts.append(text)
+
+        bio = "\n\n".join(bio_parts)
+        self._author_bio_cache[contributor_id] = bio
+        return bio
 
     def _discover_chapters(self, book_id: str) -> list[dict]:
         """Try sequential chapter numbers until 404."""

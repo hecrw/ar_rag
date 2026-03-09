@@ -13,6 +13,16 @@ SHAMELA_BOOKS_DIR = os.path.join(SHAMELA_DATA_DIR, "books")
 HINDAWI_BASE_URL = "https://www.hindawi.org"
 SHAMELA_BASE_URL = "https://shamela.ws"
 
+# Shamela API settings (register at https://dev.shamela.ws to get these)
+SHAMELA_API_KEY = os.environ.get("SHAMELA_API_KEY", "")
+SHAMELA_API_BOOKS_ENDPOINT = os.environ.get(
+    "SHAMELA_API_BOOKS_ENDPOINT", "https://dev.shamela.ws/api/books"
+)
+SHAMELA_API_MASTER_ENDPOINT = os.environ.get(
+    "SHAMELA_API_MASTER_PATCH_ENDPOINT", "https://dev.shamela.ws/api/master_patch"
+)
+SHAMELA_DB_DIR = os.path.join(SHAMELA_DATA_DIR, "db")
+
 # Request settings
 REQUEST_DELAY = 2  # seconds between requests
 REQUEST_TIMEOUT = 30  # seconds
@@ -41,5 +51,5 @@ def setup_logging():
 
 
 def ensure_dirs():
-    for d in [HINDAWI_BOOKS_DIR, SHAMELA_BOOKS_DIR]:
+    for d in [HINDAWI_BOOKS_DIR, SHAMELA_BOOKS_DIR, SHAMELA_DB_DIR]:
         os.makedirs(d, exist_ok=True)

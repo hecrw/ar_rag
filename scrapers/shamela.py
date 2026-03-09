@@ -1,338 +1,272 @@
-import json
+"""Shamela.ws scraper — extracts books from the downloaded Shamela database.
+
+The Shamela desktop database is a collection of .bok files (MS Access .mdb format).
+Each .bok file contains one or more books with Arabic text.
+
+Setup:
+  1. Download the full Shamela database from:
+     https://archive.org/download/shamela4_official/shamela.full.1446.1.iso
+  2. Mount or extract the ISO
+  3. Point this scraper at the directory containing .bok files:
+     python main.py shamela --db-path /path/to/shamela/Books/
+
+The .bok file schema (MS Access / MDB format):
+  - Table 'Main': metadata with columns BkId, Bk (title), Betaka (intro)
+  - Table 'b{BkId}': page content with columns id, nass (text), page, part
+  - Table 't{BkId}': table of contents with columns id, tit, lvl, sub
+"""
+
 import os
 import re
-import time
 
-from bs4 import BeautifulSoup
 from tqdm import tqdm
 
-from config import SHAMELA_BASE_URL, SHAMELA_DATA_DIR, SHAMELA_BOOKS_DIR, HEADERS
+from config import SHAMELA_DATA_DIR, SHAMELA_BOOKS_DIR, SHAMELA_BASE_URL
 from scrapers.base import BaseScraper
 from utils.text_cleaning import clean_arabic_text
 
 
 class ShamelaScraper(BaseScraper):
-    """Scraper for shamela.ws Islamic sciences library.
-
-    Uses requests for catalog pages (authors index) and Playwright
-    for book content pages (which are behind Cloudflare protection).
-    """
+    """Extracts books from the downloaded Shamela database (.bok files)."""
 
     CATALOG_FILE = os.path.join(SHAMELA_DATA_DIR, "catalog.json")
-    COOKIES_FILE = os.path.join(SHAMELA_DATA_DIR, "cookies.json")
 
-    def __init__(self, **kwargs):
+    def __init__(self, db_path: str = "", **kwargs):
         super().__init__(**kwargs)
-        self._browser = None
-        self._context = None
-        self._page = None
-        self._playwright = None
+        self.db_path = db_path
 
-    def _init_browser(self):
-        """Initialize Playwright browser for Cloudflare-protected pages.
+    def _find_bok_files(self) -> list[str]:
+        """Find all .bok files in the database directory."""
+        if not self.db_path:
+            self.logger.error(
+                "No database path provided. Use --db-path to specify the "
+                "directory containing .bok files from the Shamela download."
+            )
+            return []
 
-        Opens a visible browser window. On first run, the user must
-        solve the Cloudflare challenge (click the checkbox). The session
-        cookies are then saved and reused.
+        if not os.path.isdir(self.db_path):
+            self.logger.error(f"Directory not found: {self.db_path}")
+            return []
+
+        bok_files = []
+        for root, _, files in os.walk(self.db_path):
+            for f in files:
+                if f.lower().endswith(".bok"):
+                    bok_files.append(os.path.join(root, f))
+
+        self.logger.info(f"Found {len(bok_files)} .bok files")
+        return sorted(bok_files)
+
+    def _parse_bok_file(self, bok_path: str) -> list[dict]:
+        """Parse a single .bok file and extract all books from it.
+
+        A .bok file may contain one or more books.
+        Returns a list of book dicts.
         """
-        if self._browser is not None:
-            return
-
-        from playwright.sync_api import sync_playwright
-
-        self.logger.info(
-            "Starting browser for Shamela scraping. "
-            "If a Cloudflare challenge appears, please solve it manually."
-        )
-
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=False)
-
-        # Load saved cookies if available
-        storage_state = None
-        if os.path.exists(self.COOKIES_FILE):
-            storage_state = self.COOKIES_FILE
-            self.logger.info("Loading saved cookies")
-
-        self._context = self._browser.new_context(
-            locale="ar-SA",
-            timezone_id="Asia/Riyadh",
-            storage_state=storage_state,
-        )
-        self._page = self._context.new_page()
-
-    def _save_cookies(self):
-        """Save browser cookies for reuse across sessions."""
-        if self._context:
-            state = self._context.storage_state()
-            os.makedirs(os.path.dirname(self.COOKIES_FILE), exist_ok=True)
-            with open(self.COOKIES_FILE, "w") as f:
-                json.dump(state, f)
-
-    def _close_browser(self):
-        """Clean up browser resources."""
-        if self._browser:
-            self._save_cookies()
-            self._browser.close()
-            self._playwright.stop()
-            self._browser = None
-            self._context = None
-            self._page = None
-            self._playwright = None
-
-    def _fetch_with_browser(self, url: str, wait_selector: str = ".nass") -> str | None:
-        """Fetch a page using Playwright, waiting for content to load.
-
-        Returns the page HTML on success, None on failure.
-        """
-        self._init_browser()
-        self._rate_limit()
-        self._last_request_time = time.time()
+        from access_parser import AccessParser
 
         try:
-            self._page.goto(url, wait_until="domcontentloaded", timeout=30000)
-
-            # Wait for content or detect Cloudflare challenge
-            try:
-                self._page.wait_for_selector(wait_selector, timeout=10000)
-            except Exception:
-                # Check if we're on Cloudflare challenge
-                title = self._page.title()
-                if "لحظة" in title or "moment" in title.lower():
-                    self.logger.info(
-                        "Cloudflare challenge detected. Please solve it in the browser window..."
-                    )
-                    # Wait for user to solve challenge (up to 120 seconds)
-                    try:
-                        self._page.wait_for_selector(wait_selector, timeout=120000)
-                        # Save cookies after solving challenge
-                        self._save_cookies()
-                    except Exception:
-                        self.logger.warning(f"Timed out waiting for challenge resolution: {url}")
-                        return None
-                else:
-                    # Page loaded but no matching selector - might be 404 or different structure
-                    return None
-
-            return self._page.content()
-
+            db = AccessParser(bok_path)
         except Exception as e:
-            self.logger.warning(f"Browser error fetching {url}: {e}")
-            return None
-
-    def scrape_catalog(self) -> list[dict]:
-        """Build catalog by scraping author pages to collect all book IDs.
-
-        Uses requests (no Cloudflare on author pages).
-        Returns list of {id, title, author, url} dicts.
-        """
-        existing = self.load_json(self.CATALOG_FILE)
-        if existing:
-            self.logger.info(f"Loaded existing catalog with {len(existing)} books")
-            return existing
-
-        self.logger.info("Scraping Shamela book catalog via authors index...")
-
-        # Step 1: Get all author IDs
-        author_ids = self._scrape_author_ids()
-        self.logger.info(f"Found {len(author_ids)} authors")
-
-        # Step 2: For each author, get their book list
-        catalog = []
-        seen_book_ids = set()
-
-        for author_id, author_name in tqdm(author_ids, desc="Authors"):
-            books = self._scrape_author_books(author_id, author_name)
-            for book in books:
-                if book["id"] not in seen_book_ids:
-                    seen_book_ids.add(book["id"])
-                    catalog.append(book)
-
-            # Save incrementally every 100 authors
-            if len(catalog) % 500 == 0 and catalog:
-                self.save_json(catalog, self.CATALOG_FILE)
-
-        self.logger.info(f"Found {len(catalog)} unique books in catalog")
-        self.save_json(catalog, self.CATALOG_FILE)
-        return catalog
-
-    def _scrape_author_ids(self) -> list[tuple[str, str]]:
-        """Scrape the authors index page for (author_id, author_name) pairs."""
-        url = f"{SHAMELA_BASE_URL}/authors"
-        response = self.fetch(url)
-        if response is None:
-            self.logger.error("Failed to fetch authors index")
+            self.logger.warning(f"Cannot parse {bok_path}: {e}")
             return []
 
-        soup = BeautifulSoup(response.text, "lxml")
-        authors = []
-        seen = set()
-
-        for a in soup.find_all("a", href=re.compile(r"/author/\d+")):
-            href = a.get("href", "")
-            match = re.search(r"/author/(\d+)", href)
-            if match:
-                author_id = match.group(1)
-                if author_id not in seen:
-                    seen.add(author_id)
-                    author_name = a.get_text(strip=True)
-                    authors.append((author_id, author_name))
-
-        return authors
-
-    def _scrape_author_books(self, author_id: str, author_name: str) -> list[dict]:
-        """Get all books from an author's page."""
-        url = f"{SHAMELA_BASE_URL}/author/{author_id}"
-        response = self.fetch(url)
-        if response is None:
-            return []
-
-        soup = BeautifulSoup(response.text, "lxml")
         books = []
-        seen = set()
 
-        for a in soup.find_all("a", href=re.compile(r"/book/\d+")):
-            href = a.get("href", "")
-            match = re.search(r"/book/(\d+)", href)
-            if match:
-                book_id = match.group(1)
-                title = a.get_text(strip=True)
-                if title and book_id not in seen:
-                    seen.add(book_id)
-                    books.append({
-                        "id": book_id,
-                        "title": title,
-                        "author": author_name,
-                        "url": f"{SHAMELA_BASE_URL}/book/{book_id}",
-                    })
+        # Read the Main table for book metadata
+        try:
+            main_table = db.parse_table("Main")
+        except Exception:
+            # Some .bok files may have different structure
+            self.logger.debug(f"No 'Main' table in {bok_path}")
+            return []
+
+        if not main_table:
+            return []
+
+        # Main table columns: BkId, Bk (title), Betaka (intro), Auth (author), ...
+        bk_ids = main_table.get("BkId", [])
+        bk_names = main_table.get("Bk", [])
+        betakas = main_table.get("Betaka", [])
+        authors = main_table.get("Auth", main_table.get("auth", []))
+
+        for i in range(len(bk_ids)):
+            book_id = str(bk_ids[i]) if i < len(bk_ids) else ""
+            title = self._decode_field(bk_names[i]) if i < len(bk_names) else ""
+            betaka = self._decode_field(betakas[i]) if i < len(betakas) else ""
+
+            if not book_id:
+                continue
+
+            # Extract author from Auth column or from Betaka text
+            author = ""
+            if i < len(authors):
+                author = self._decode_field(authors[i]).strip()
+            if not author and betaka:
+                author = self._extract_author_from_betaka(betaka)
+
+            # Read body table: b{BkId}
+            body_table_name = f"b{book_id}"
+            try:
+                body = db.parse_table(body_table_name)
+            except Exception:
+                self.logger.debug(f"No body table '{body_table_name}' in {bok_path}")
+                continue
+
+            if not body:
+                continue
+
+            # Extract pages
+            pages = []
+            nass_col = body.get("nass", body.get("Nass", []))
+            id_col = body.get("id", body.get("Id", list(range(1, len(nass_col) + 1))))
+            page_col = body.get("page", body.get("Page", []))
+            part_col = body.get("part", body.get("Part", []))
+
+            for j in range(len(nass_col)):
+                raw_text = self._decode_field(nass_col[j])
+                text = self._clean_nass(raw_text)
+                if not text:
+                    continue
+
+                page_data = {
+                    "number": id_col[j] if j < len(id_col) else j + 1,
+                    "text": text,
+                }
+                if j < len(page_col) and page_col[j]:
+                    page_data["page"] = page_col[j]
+                if j < len(part_col) and part_col[j]:
+                    page_data["part"] = part_col[j]
+
+                pages.append(page_data)
+
+            if not pages:
+                continue
+
+            # Read TOC table: t{BkId} (optional)
+            toc = []
+            toc_table_name = f"t{book_id}"
+            try:
+                toc_table = db.parse_table(toc_table_name)
+                if toc_table:
+                    tit_col = toc_table.get("tit", toc_table.get("Tit", []))
+                    lvl_col = toc_table.get("lvl", toc_table.get("Lvl", []))
+                    for k in range(len(tit_col)):
+                        heading = self._decode_field(tit_col[k])
+                        if heading:
+                            toc.append({
+                                "title": heading,
+                                "level": lvl_col[k] if k < len(lvl_col) else 0,
+                            })
+            except Exception:
+                pass
+
+            book_data = {
+                "id": book_id,
+                "title": title,
+                "author": author,
+                "description": clean_arabic_text(betaka) if betaka else "",
+                "url": f"{SHAMELA_BASE_URL}/book/{book_id}",
+                "total_pages": len(pages),
+                "pages": pages,
+                "source_file": os.path.basename(bok_path),
+            }
+            if toc:
+                book_data["toc"] = toc
+
+            books.append(book_data)
 
         return books
 
-    def scrape_book(self, book_id: str, book_title: str, author: str) -> dict | None:
-        """Scrape a single book using the browser."""
-        filepath = os.path.join(SHAMELA_BOOKS_DIR, f"{book_id}.json")
-        if self.book_exists(filepath):
-            self.logger.debug(f"Skipping {book_id} (already scraped)")
-            return None
+    @staticmethod
+    def _extract_author_from_betaka(betaka: str) -> str:
+        """Extract author name from the Betaka (description) field.
 
-        pages = []
-        page_num = 1
-        consecutive_failures = 0
-
-        while consecutive_failures < 3:
-            url = f"{SHAMELA_BASE_URL}/book/{book_id}/{page_num}"
-            html = self._fetch_with_browser(url)
-
-            if html is None:
-                consecutive_failures += 1
-                if page_num == 1:
-                    self.logger.warning(f"Cannot access book {book_id}")
-                    return None
-                page_num += 1
-                continue
-
-            consecutive_failures = 0
-            text = self._extract_page_text(html)
-
-            if not text:
-                page_num += 1
-                consecutive_failures += 1
-                continue
-
-            pages.append({
-                "number": page_num,
-                "text": text,
-                "url": url,
-            })
-
-            page_num += 1
-
-        if not pages:
-            self.logger.warning(f"No pages found for book {book_id}")
-            return None
-
-        # Extract title from first page if possible
-        first_html = self._fetch_with_browser(
-            f"{SHAMELA_BASE_URL}/book/{book_id}/1", wait_selector="h1"
-        )
-        actual_title = book_title
-        if first_html:
-            soup = BeautifulSoup(first_html, "lxml")
-            h1 = soup.find("h1")
-            if h1:
-                actual_title = h1.get_text(strip=True) or book_title
-
-        book_data = {
-            "id": book_id,
-            "title": actual_title,
-            "author": author,
-            "url": f"{SHAMELA_BASE_URL}/book/{book_id}",
-            "total_pages": len(pages),
-            "pages": pages,
-        }
-
-        self.save_json(book_data, filepath)
-        return book_data
-
-    def _extract_page_text(self, html: str) -> str:
-        """Extract text content from a Shamela book page."""
-        soup = BeautifulSoup(html, "lxml")
-
-        # Primary selector: div.nass contains the book text
-        nass_divs = soup.find_all(class_="nass")
-        if nass_divs:
-            parts = []
-            for nass in nass_divs:
-                paragraphs = nass.find_all("p")
-                if paragraphs:
-                    for p in paragraphs:
-                        text = p.get_text(strip=True)
-                        if text:
-                            parts.append(text)
-                else:
-                    text = nass.get_text(strip=True)
-                    if text:
-                        parts.append(text)
-            return clean_arabic_text("\n".join(parts))
-
-        # Fallback: try the wrapper div
-        wrapper = soup.find(id="wrapper")
-        if wrapper:
-            return clean_arabic_text(wrapper.get_text(separator="\n", strip=True))
-
+        The Betaka often contains a line like:
+          المؤلف: ابن كثير
+        or
+          المؤلف : أبو حامد الغزالي
+        """
+        # Match "المؤلف" followed by optional space, colon, then the name
+        match = re.search(r"المؤلف\s*:\s*(.+?)(?:\n|$)", betaka)
+        if match:
+            return match.group(1).strip()
         return ""
 
+    @staticmethod
+    def _decode_field(value) -> str:
+        """Decode a field value from the MDB database."""
+        if value is None:
+            return ""
+        if isinstance(value, bytes):
+            # Try UTF-8 first, then Windows-1256 (common Arabic encoding)
+            for encoding in ("utf-8", "cp1256", "iso-8859-6"):
+                try:
+                    return value.decode(encoding)
+                except (UnicodeDecodeError, AttributeError):
+                    continue
+            return value.decode("utf-8", errors="replace")
+        return str(value)
+
+    @staticmethod
+    def _clean_nass(text: str) -> str:
+        """Clean the nass (text content) field from Shamela."""
+        if not text:
+            return ""
+        # Remove HTML tags if present
+        if "<" in text and ">" in text:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(text, "lxml")
+            text = soup.get_text(separator="\n", strip=True)
+        return clean_arabic_text(text)
+
     def run(self, limit: int | None = None):
-        """Run the full scraping pipeline.
+        """Parse .bok files and save each book as JSON.
 
         Args:
-            limit: Max number of books to scrape (None for all).
+            limit: Max number of books to extract (None for all).
         """
-        try:
-            catalog = self.scrape_catalog()
+        if not self.db_path:
+            self.logger.error(
+                "\n"
+                "========================================\n"
+                "  Shamela database path required!\n"
+                "\n"
+                "  1. Download the Shamela database:\n"
+                "     https://archive.org/download/shamela4_official/shamela.full.1446.1.iso\n"
+                "  2. Mount or extract the ISO\n"
+                "  3. Run with --db-path:\n"
+                "     python main.py shamela --db-path /path/to/shamela/Books/\n"
+                "========================================"
+            )
+            return
 
-            if limit:
-                catalog = catalog[:limit]
+        bok_files = self._find_bok_files()
+        if not bok_files:
+            return
 
-            self.logger.info(f"Scraping {len(catalog)} books from Shamela...")
+        scraped = 0
+        skipped = 0
 
-            scraped = 0
-            skipped = 0
+        for bok_path in tqdm(bok_files, desc="Processing .bok files"):
+            books = self._parse_bok_file(bok_path)
 
-            for book in tqdm(catalog, desc="Books"):
+            for book in books:
+                if limit and scraped >= limit:
+                    self.logger.info(f"Reached limit of {limit} books")
+                    self.logger.info(
+                        f"Done: {scraped} extracted, {skipped} skipped"
+                    )
+                    return
+
                 filepath = os.path.join(SHAMELA_BOOKS_DIR, f"{book['id']}.json")
                 if self.book_exists(filepath):
                     skipped += 1
                     continue
 
-                result = self.scrape_book(
-                    book["id"], book["title"], book.get("author", "")
-                )
-                if result:
-                    scraped += 1
+                self.save_json(book, filepath)
+                scraped += 1
 
-            self.logger.info(
-                f"Done: {scraped} scraped, {skipped} skipped (already existed)"
-            )
-        finally:
-            self._close_browser()
+        self.logger.info(
+            f"Done: {scraped} extracted, {skipped} skipped (already existed)"
+        )
