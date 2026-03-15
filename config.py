@@ -23,6 +23,23 @@ SHAMELA_API_MASTER_ENDPOINT = os.environ.get(
 )
 SHAMELA_DB_DIR = os.path.join(SHAMELA_DATA_DIR, "db")
 
+# RAG settings
+CHROMA_DIR = os.path.join(DATA_DIR, "chromadb")
+COLLECTION_NAME = "arabic_books"
+INGEST_DB_PATH = os.path.join(DATA_DIR, "ingest_progress.db")
+
+EMBEDDING_MODEL = "intfloat/multilingual-e5-base"
+EMBEDDING_DIMENSION = 768
+
+OLLAMA_URL = "http://localhost:11434"
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
+
+CHUNK_SIZE = 1000  # characters
+CHUNK_OVERLAP = 200  # characters
+MIN_CHUNK_SIZE = 100  # discard chunks smaller than this
+EMBED_BATCH_SIZE = 64
+TOP_K = 5
+
 # Request settings
 REQUEST_DELAY = 2  # seconds between requests
 REQUEST_TIMEOUT = 30  # seconds
@@ -51,5 +68,5 @@ def setup_logging():
 
 
 def ensure_dirs():
-    for d in [HINDAWI_BOOKS_DIR, SHAMELA_BOOKS_DIR, SHAMELA_DB_DIR]:
+    for d in [HINDAWI_BOOKS_DIR, SHAMELA_BOOKS_DIR, SHAMELA_DB_DIR, CHROMA_DIR]:
         os.makedirs(d, exist_ok=True)
