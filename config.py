@@ -28,7 +28,7 @@ CHROMA_DIR = os.path.join(DATA_DIR, "chromadb")
 COLLECTION_NAME = "arabic_books"
 INGEST_DB_PATH = os.path.join(DATA_DIR, "ingest_progress.db")
 
-EMBEDDING_MODEL = "intfloat/multilingual-e5-base"
+EMBEDDING_MODEL = "nomic-ai/nomic-embed-text-v2-moe"
 EMBEDDING_DIMENSION = 768
 
 OLLAMA_URL = "http://localhost:11434"
