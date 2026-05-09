@@ -2,6 +2,7 @@
 
 import logging
 
+import torch
 from sentence_transformers import SentenceTransformer
 
 from config import EMBEDDING_MODEL, EMBED_BATCH_SIZE
@@ -9,12 +10,23 @@ from config import EMBEDDING_MODEL, EMBED_BATCH_SIZE
 logger = logging.getLogger(__name__)
 
 
+def _pick_device() -> str:
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 class Embedder:
     """Wraps a sentence-transformers model for encoding text."""
 
     def __init__(self, model_name: str = EMBEDDING_MODEL):
-        logger.info(f"Loading embedding model: {model_name}")
-        self.model = SentenceTransformer(model_name, trust_remote_code=True)
+        device = _pick_device()
+        logger.info(f"Loading embedding model: {model_name} on {device}")
+        self.model = SentenceTransformer(
+            model_name, trust_remote_code=True, device=device
+        )
         self._is_e5 = "e5" in model_name.lower()
         logger.info("Embedding model loaded")
 
