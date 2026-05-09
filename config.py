@@ -37,7 +37,7 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 CHUNK_SIZE = 1000  # characters
 CHUNK_OVERLAP = 200  # characters
 MIN_CHUNK_SIZE = 100  # discard chunks smaller than this
-EMBED_BATCH_SIZE = 64
+EMBED_BATCH_SIZE = 128
 TOP_K = 5
 
 # Request settings

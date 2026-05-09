@@ -23,9 +23,16 @@ class Embedder:
 
     def __init__(self, model_name: str = EMBEDDING_MODEL):
         device = _pick_device()
-        logger.info(f"Loading embedding model: {model_name} on {device}")
+        model_kwargs = {"torch_dtype": torch.float16} if device == "cuda" else {}
+        logger.info(
+            f"Loading embedding model: {model_name} on {device} "
+            f"({'fp16' if model_kwargs else 'fp32'})"
+        )
         self.model = SentenceTransformer(
-            model_name, trust_remote_code=True, device=device
+            model_name,
+            trust_remote_code=True,
+            device=device,
+            model_kwargs=model_kwargs,
         )
         self._is_e5 = "e5" in model_name.lower()
         logger.info("Embedding model loaded")
