@@ -27,10 +27,11 @@ def _iter_dir(source: str, books_dir: str) -> Iterator[tuple[str, dict]]:
         if not entry.name.endswith(".json"):
             continue
         try:
-            with open(entry.path, "r", encoding="utf-8") as f:
-                book = json.load(f)
+            with open(entry.path, "rb") as f:
+                book = json.loads(f.read().decode("utf-8", errors="replace"))
             yield source, book
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"  skipping {entry.name}: {e}")
             continue
 
 
