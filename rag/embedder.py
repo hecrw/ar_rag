@@ -14,7 +14,7 @@ class Embedder:
 
     def __init__(self, model_name: str = EMBEDDING_MODEL):
         logger.info(f"Loading embedding model: {model_name}")
-        self.model = SentenceTransformer(model_name)
+        self.model = SentenceTransformer(model_name, trust_remote_code=True)
         self._is_e5 = "e5" in model_name.lower()
         logger.info("Embedding model loaded")
 
