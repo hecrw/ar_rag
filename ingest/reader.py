@@ -13,9 +13,27 @@ def iter_books(source: str) -> Iterator[tuple[str, dict]]:
     Reads one file at a time to keep memory usage low.
     """
     if source in ("shamela", "all"):
+        _purge_appledouble(SHAMELA_BOOKS_DIR)
         yield from _iter_dir("shamela", SHAMELA_BOOKS_DIR)
     if source in ("hindawi", "all"):
+        _purge_appledouble(HINDAWI_BOOKS_DIR)
         yield from _iter_dir("hindawi", HINDAWI_BOOKS_DIR)
+
+
+def _purge_appledouble(books_dir: str) -> None:
+    """Delete macOS AppleDouble metadata files (._foo.json)."""
+    if not os.path.isdir(books_dir):
+        return
+    removed = 0
+    for entry in os.scandir(books_dir):
+        if entry.name.startswith("._") and entry.name.endswith(".json"):
+            try:
+                os.remove(entry.path)
+                removed += 1
+            except OSError:
+                pass
+    if removed:
+        print(f"  removed {removed} AppleDouble files from {books_dir}")
 
 
 def _iter_dir(source: str, books_dir: str) -> Iterator[tuple[str, dict]]:
