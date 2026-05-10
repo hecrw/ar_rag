@@ -61,6 +61,30 @@ def cmd_ui(args):
     launch(host=args.host, port=args.port, share=args.share)
 
 
+def cmd_bm25_build(args):
+    """Build the BM25 index from chunks already in the vector store."""
+    from rag.bm25_retriever import BM25Retriever
+    from rag.vectorstore import VectorStore
+
+    print(f"\n{'='*50}")
+    print("Building BM25 index from vector store")
+    print(f"{'='*50}\n")
+
+    vs = VectorStore()
+    total = vs.count()
+    print(f"Pulling {total} chunks from ChromaDB...")
+    docs = []
+    for chunk in vs.iter_all(batch_size=5000):
+        docs.append(chunk)
+        if len(docs) % 10000 == 0:
+            print(f"  fetched {len(docs)}/{total}")
+    print(f"Got {len(docs)} chunks; building BM25 index...")
+
+    bm25 = BM25Retriever()
+    bm25.build(docs)
+    print(f"\nBM25 index built at {bm25.index_dir}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Arabic RAG System")
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
@@ -105,6 +129,9 @@ def main():
     ui_parser.add_argument("--port", type=int, default=7860)
     ui_parser.add_argument("--share", action="store_true", help="Create a public link")
 
+    # BM25 index build command
+    subparsers.add_parser("bm25-build", help="Build BM25 index from vector store chunks")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -126,6 +153,8 @@ def main():
         cmd_serve(args)
     elif args.command == "ui":
         cmd_ui(args)
+    elif args.command == "bm25-build":
+        cmd_bm25_build(args)
 
 
 if __name__ == "__main__":

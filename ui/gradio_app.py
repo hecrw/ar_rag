@@ -4,7 +4,8 @@ import logging
 
 import gradio as gr
 
-from config import RERANK_ENABLED, TOP_K, setup_logging
+from config import BM25_ENABLED, RERANK_ENABLED, TOP_K, setup_logging
+from rag.bm25_retriever import BM25Retriever
 from rag.embedder import Embedder
 from rag.generator import Generator
 from rag.pipeline import RAGPipeline
@@ -36,7 +37,12 @@ def build_app() -> gr.Blocks:
     embedder = Embedder()
     vectorstore = VectorStore()
     reranker = Reranker() if RERANK_ENABLED else None
-    retriever = Retriever(embedder, vectorstore, reranker=reranker)
+    bm25 = None
+    if BM25_ENABLED:
+        bm25 = BM25Retriever()
+        if not bm25.load():
+            bm25 = None
+    retriever = Retriever(embedder, vectorstore, reranker=reranker, bm25=bm25)
     generator = Generator()
     pipeline = RAGPipeline(retriever, generator)
 
