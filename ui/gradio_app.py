@@ -79,7 +79,7 @@ def build_app() -> gr.Blocks:
                     submit = gr.Button("Ask", variant="primary")
                     clear = gr.Button("Clear")
                 answer = gr.Textbox(
-                    label="الإجابة / Answer", rtl=True, lines=10, show_copy_button=True
+                    label="الإجابة / Answer", rtl=True, lines=10
                 )
             with gr.Column(scale=1):
                 top_k = gr.Slider(
