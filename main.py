@@ -50,6 +50,17 @@ def cmd_serve(args):
     uvicorn.run("api.app:app", host=args.host, port=args.port, reload=args.reload)
 
 
+def cmd_ui(args):
+    """Launch the Gradio chat UI."""
+    from ui.gradio_app import launch
+
+    print(f"\n{'='*50}")
+    print(f"Starting Gradio UI on {args.host}:{args.port}")
+    print(f"{'='*50}\n")
+
+    launch(host=args.host, port=args.port, share=args.share)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Arabic RAG System")
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
@@ -88,6 +99,12 @@ def main():
     serve_parser.add_argument("--port", type=int, default=8000)
     serve_parser.add_argument("--reload", action="store_true")
 
+    # UI command
+    ui_parser = subparsers.add_parser("ui", help="Launch the Gradio chat UI")
+    ui_parser.add_argument("--host", type=str, default="127.0.0.1")
+    ui_parser.add_argument("--port", type=int, default=7860)
+    ui_parser.add_argument("--share", action="store_true", help="Create a public link")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -107,6 +124,8 @@ def main():
         cmd_ingest(args)
     elif args.command == "serve":
         cmd_serve(args)
+    elif args.command == "ui":
+        cmd_ui(args)
 
 
 if __name__ == "__main__":
