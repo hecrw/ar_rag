@@ -82,12 +82,29 @@ class VectorStore:
         hits = []
         for i in range(len(results["ids"][0])):
             hits.append({
+                "id": results["ids"][0][i],
                 "text": results["documents"][0][i],
                 "metadata": results["metadatas"][0][i],
-                "score": 1 - results["distances"][0][i],  # cosine distance → similarity
+                "score": 1 - results["distances"][0][i],
             })
 
         return hits
+
+    def iter_all(self, batch_size: int = 5000):
+        """Yield every stored chunk as dicts with id/text/metadata."""
+        total = self.collection.count()
+        for offset in range(0, total, batch_size):
+            res = self.collection.get(
+                limit=batch_size,
+                offset=offset,
+                include=["documents", "metadatas"],
+            )
+            for i, did in enumerate(res["ids"]):
+                yield {
+                    "id": did,
+                    "text": res["documents"][i],
+                    "metadata": res["metadatas"][i] or {},
+                }
 
     def delete_book(self, book_id: str, source: str):
         """Delete all chunks for a specific book."""
