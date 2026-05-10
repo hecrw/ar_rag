@@ -4,10 +4,11 @@ import logging
 
 import gradio as gr
 
-from config import TOP_K, setup_logging
+from config import RERANK_ENABLED, TOP_K, setup_logging
 from rag.embedder import Embedder
 from rag.generator import Generator
 from rag.pipeline import RAGPipeline
+from rag.reranker import Reranker
 from rag.retriever import Retriever
 from rag.vectorstore import VectorStore
 
@@ -34,7 +35,8 @@ def build_app() -> gr.Blocks:
     logger.info("Loading RAG components for Gradio UI...")
     embedder = Embedder()
     vectorstore = VectorStore()
-    retriever = Retriever(embedder, vectorstore)
+    reranker = Reranker() if RERANK_ENABLED else None
+    retriever = Retriever(embedder, vectorstore, reranker=reranker)
     generator = Generator()
     pipeline = RAGPipeline(retriever, generator)
 

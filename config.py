@@ -31,6 +31,13 @@ INGEST_DB_PATH = os.path.join(DATA_DIR, "ingest_progress.db")
 EMBEDDING_MODEL = "nomic-ai/nomic-embed-text-v2-moe"
 EMBEDDING_DIMENSION = 768
 
+# Reranker (cross-encoder over (query, chunk) pairs).
+# bge-reranker-v2-m3 is multilingual and strong on Arabic. ~568M params, ~1.2GB in fp16.
+# If VRAM is tight (8GB GPU + LLM + embedder), switch to "BAAI/bge-reranker-base" (~280MB).
+RERANKER_MODEL = os.environ.get("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+RERANK_ENABLED = os.environ.get("RERANK_ENABLED", "1") not in ("0", "false", "False")
+RERANK_FETCH_K = 30  # candidates pulled from vector store before reranking
+
 OLLAMA_URL = "http://localhost:11434"
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 

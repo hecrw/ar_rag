@@ -5,10 +5,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import setup_logging
+from config import RERANK_ENABLED, setup_logging
 from rag.embedder import Embedder
 from rag.vectorstore import VectorStore
 from rag.retriever import Retriever
+from rag.reranker import Reranker
 from rag.generator import Generator
 from rag.pipeline import RAGPipeline
 
@@ -20,7 +21,8 @@ async def lifespan(app: FastAPI):
 
     embedder = Embedder()
     vectorstore = VectorStore()
-    retriever = Retriever(embedder, vectorstore)
+    reranker = Reranker() if RERANK_ENABLED else None
+    retriever = Retriever(embedder, vectorstore, reranker=reranker)
     generator = Generator()
     pipeline = RAGPipeline(retriever, generator)
 
