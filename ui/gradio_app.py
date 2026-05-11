@@ -84,9 +84,8 @@ def build_app() -> gr.Blocks:
                 with gr.Row():
                     submit = gr.Button("Ask", variant="primary")
                     clear = gr.Button("Clear")
-                answer = gr.Textbox(
-                    label="الإجابة / Answer", rtl=True, lines=10
-                )
+                gr.Markdown("### الإجابة / Answer")
+                answer = gr.Markdown(rtl=True, value="")
             with gr.Column(scale=1):
                 top_k = gr.Slider(
                     1, 20, value=TOP_K, step=1, label="Top K (sources)"
