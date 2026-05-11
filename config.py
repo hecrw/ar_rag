@@ -30,6 +30,7 @@ INGEST_DB_PATH = os.path.join(DATA_DIR, "ingest_progress.db")
 BM25_INDEX_DIR = os.path.join(DATA_DIR, "bm25_index")
 BM25_ENABLED = os.environ.get("BM25_ENABLED", "1") not in ("0", "false", "False")
 RRF_K = 60
+MAX_HISTORY_TURNS = 6
 
 EMBEDDING_MODEL = "nomic-ai/nomic-embed-text-v2-moe"
 EMBEDDING_DIMENSION = 768

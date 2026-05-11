@@ -52,19 +52,30 @@ def build_app() -> gr.Blocks:
         f"Ready. Ollama reachable: {ollama_ok}, vectors in store: {vector_count}"
     )
 
-    async def respond(message: str, top_k: float, source: str):
+    async def respond(message: str, history: list, top_k: float, source: str):
         message = (message or "").strip()
+        history = history or []
         if not message:
-            return "Please enter a question.", ""
+            return history, "", ""
         src = None if source == "all" else source
         try:
             result = await pipeline.query(
-                query=message, top_k=int(top_k), source=src
+                query=message,
+                top_k=int(top_k),
+                source=src,
+                history=history,
             )
+            answer = result["answer"]
+            sources_md = _format_sources(result["sources"])
         except Exception as e:
             logger.exception("Query failed")
-            return f"Error: {e}", ""
-        return result["answer"], _format_sources(result["sources"])
+            answer = f"**Error:** {e}"
+            sources_md = ""
+        new_history = history + [
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": answer},
+        ]
+        return new_history, "", sources_md
 
     with gr.Blocks(title="Arabic RAG", theme=gr.themes.Soft()) as app:
         gr.Markdown(
@@ -75,17 +86,22 @@ def build_app() -> gr.Blocks:
 
         with gr.Row():
             with gr.Column(scale=3):
+                chatbot = gr.Chatbot(
+                    type="messages",
+                    height=500,
+                    rtl=True,
+                    show_copy_button=True,
+                    label="المحادثة / Conversation",
+                )
                 question = gr.Textbox(
-                    label="السؤال / Question",
                     placeholder="اكتب سؤالك هنا...",
                     rtl=True,
                     lines=2,
+                    show_label=False,
                 )
                 with gr.Row():
                     submit = gr.Button("Ask", variant="primary")
-                    clear = gr.Button("Clear")
-                gr.Markdown("### الإجابة / Answer")
-                answer = gr.Markdown(rtl=True, value="")
+                    clear = gr.Button("Clear chat")
             with gr.Column(scale=1):
                 top_k = gr.Slider(
                     1, 20, value=TOP_K, step=1, label="Top K (sources)"
@@ -95,23 +111,22 @@ def build_app() -> gr.Blocks:
                     value="all",
                     label="Source filter",
                 )
-
-        gr.Markdown("### Retrieved sources")
-        sources_md = gr.Markdown()
+                gr.Markdown("### Retrieved sources")
+                sources_md = gr.Markdown()
 
         submit.click(
             respond,
-            inputs=[question, top_k, source],
-            outputs=[answer, sources_md],
+            inputs=[question, chatbot, top_k, source],
+            outputs=[chatbot, question, sources_md],
         )
         question.submit(
             respond,
-            inputs=[question, top_k, source],
-            outputs=[answer, sources_md],
+            inputs=[question, chatbot, top_k, source],
+            outputs=[chatbot, question, sources_md],
         )
         clear.click(
-            lambda: ("", "", ""),
-            outputs=[question, answer, sources_md],
+            lambda: ([], "", ""),
+            outputs=[chatbot, question, sources_md],
         )
 
     return app

@@ -17,22 +17,26 @@ class RAGPipeline:
         top_k: int = 5,
         category: str | None = None,
         source: str | None = None,
+        history: list[dict] | None = None,
     ) -> dict:
-        """Run full RAG: retrieve context, then generate answer."""
-        # Retrieve relevant chunks
+        """Run full RAG: retrieve context, then generate answer.
+
+        history: prior conversation turns as
+        [{"role": "user"|"assistant", "content": str}, ...]
+        Used only for generation; retrieval is based on the current query.
+        """
         chunks = self.retriever.retrieve(
             query, top_k=top_k, category=category, source=source
         )
 
-        # Generate answer
-        answer = await self.generator.generate(query, chunks)
+        answer = await self.generator.generate(query, chunks, history=history)
 
         return {
             "query": query,
             "answer": answer,
             "sources": [
                 {
-                    "text": c["text"][:500],  # truncate for response size
+                    "text": c["text"][:500],
                     "score": round(c["score"], 4),
                     **c["metadata"],
                 }

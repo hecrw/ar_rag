@@ -8,11 +8,17 @@ from ingest.progress import IngestProgress
 router = APIRouter()
 
 
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
 class QueryRequest(BaseModel):
     query: str
     top_k: int = 5
     category: str | None = None
     source: str | None = None
+    history: list[ChatMessage] | None = None
 
 
 @router.post("/query")
@@ -24,6 +30,7 @@ async def query(req: QueryRequest, request: Request):
         top_k=req.top_k,
         category=req.category,
         source=req.source,
+        history=[m.model_dump() for m in req.history] if req.history else None,
     )
     return result
 
